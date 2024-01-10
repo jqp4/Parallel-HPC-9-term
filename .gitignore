@@ -1,6 +1,10 @@
 *_tmp*
 *_old*
 *_ignore*
+.vscode
+
+task_01/main
+task_02/main
 
 # Created by https://www.toptal.com/developers/gitignore/api/c++,macos,linux,c
 # Edit at https://www.toptal.com/developers/gitignore?templates=c++,macos,linux,c

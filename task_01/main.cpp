@@ -133,12 +133,12 @@ class BatcherSortingNetwork {
     }
 
     // Рекурсивная процедура слияния двух групп линий (a, step, n) и (b, step, m)
-    unsigned _S(const size_t a, const size_t b, const size_t step, const size_t n, const size_t m) {
-        if (n * m < 1)
-            return 0;
-        if (n == 1 && m == 1) {
+    void _S(const size_t a, const size_t b, const size_t step, const size_t n, const size_t m) {
+        if (n * m < 1) {
+            return;
+        } else if (n == 1 && m == 1) {
             _addComparator(a, b);
-            return 1;
+            return;
         }
 
         size_t i;
@@ -146,10 +146,10 @@ class BatcherSortingNetwork {
         size_t m1 = m - m / 2;  // количество   четных строк в массиве b
 
         // объединить нечетные линии
-        unsigned tMerge1 = _S(a, b, 2 * step, n1, m1);
+        _S(a, b, 2 * step, n1, m1);
 
         // объединить четные линии
-        unsigned tMerge2 = _S(a + step, b + step, 2 * step, n - n1, m - m1);
+        _S(a + step, b + step, 2 * step, n - n1, m - m1);
 
         // далее добавить цепочку компараторов, начиная со второй линии
 
@@ -170,17 +170,15 @@ class BatcherSortingNetwork {
         for (; i < m - 1; i += 2) {
             _addComparator(b + step * i, b + step * (i + 1));
         }
-
-        return std::max(tMerge1, tMerge2) + 1;
     }
 
     // Процедура рекурсивного построения сети сортировки группы линий (first, step, n)
-    unsigned _B(const size_t first, const size_t step, const size_t n) {
-        if (n < 2)
-            return 0;
-        if (n == 2) {
+    void _B(const size_t first, const size_t step, const size_t n) {
+        if (n < 2) {
+            return;
+        } else if (n == 2) {
             _addComparator(first, first + step);
-            return 1;
+            return;
         }
 
         // число элементов в первой половине массива
@@ -190,17 +188,16 @@ class BatcherSortingNetwork {
         size_t n2 = n - n1;
 
         // упорядочить первую половину массива
-        unsigned t1 = _B(first, step, n1);
+        _B(first, step, n1);
 
         // упорядочить вторую половину массива
-        unsigned t2 = _B(first + step * n1, step, n2);
+        _B(first + step * n1, step, n2);
 
         // объединить упорядоченные части
-        unsigned tMerge = _S(first, first + step * n1, step, n1, n2);
-
-        return std::max(t1, t2) + tMerge;
+        _S(first, first + step * n1, step, n1, n2);
     }
 
+    // Функция оптимального рассчета тактов сети сортировки
     void _calculateNetworkTacts() {
         assertm(!_comparatorsVector.empty(), "Network comparators vector is empty.");
         _tactsVector.push_back(_Tact());

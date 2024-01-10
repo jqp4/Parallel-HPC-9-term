@@ -12,9 +12,6 @@
 #include <vector>
 #include "mpi.h"
 
-// usleep
-#include <unistd.h>
-
 #define assertm(exp, msg) assert(((void)msg, exp))
 
 using ElementType = __uint16_t;
@@ -272,6 +269,40 @@ void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
     }
 }
 
+void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int general_size) {
+    if (rank == 0) {
+        // размер расширенного массива
+        size_t extendedN = m * general_size;
+        // Основной массив, создается сразу расширенным
+        std::vector<double> mainArray(extendedN);
+        std::srand(unsigned(std::time(nullptr)));
+        generateArray(&mainArray, n, extendedN);
+
+        // BatcherSortingNetwork sortingNetwork(n);
+        // sortingNetwork.printComparatorsSummary();
+
+        for (int workerRank = 1; workerRank < general_size; workerRank++) {
+            unsigned i0 = workerRank * m;
+            MPI_Send(&mainArray[i0], m, MPI_DOUBLE, workerRank, 0, MPI_COMM_WORLD);
+        }
+
+        for (int i = 0; i < m; i++) {
+            (*myArray)[i] = mainArray[i];
+        }
+    } else {
+        // первым действием принимаем свою часть массива
+        MPI_Recv(&(*myArray)[0], m, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // std::cout << rank << ":\n";
+        // for (int i = 0; i < m; i++) {
+        //     std::cout << myArray[i] << " ";
+        // }
+        // std::cout << std::endl;
+    }
+
+    std::sort((*myArray).begin(), (*myArray).end());
+}
+
 int main(int argc, char* argv[]) {
     const size_t n = 30;
 
@@ -288,44 +319,17 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &general_size);
 
-    const int masterRank = 0;
-    int workers_num = general_size - 1;
-    assertm(workers_num > 0, "workers_num <= 0");
-
     // размер куска массива для каждого процесса
-    size_t m = (int)std::ceil((double)n / workers_num);
-    // размер расширенного массива
-    size_t extendedN = m * workers_num;
+    size_t m = (int)std::ceil((double)n / general_size);
+    std::vector<double> myArray(m);
+    // std::vector<double> otherArray(m);
+    shareArray(n, m, &myArray, rank, general_size);
 
-    if (rank == masterRank) {
-        std::vector<double> mainArray(extendedN);
-        std::srand(unsigned(std::time(nullptr)));
-        generateArray(&mainArray, n, extendedN);
-
-        // for (int i = 0; i < extendedN; i++) {
-        //     std::cout << array[i] << " ";
-        // }
-
-        // BatcherSortingNetwork sortingNetwork(n);
-        // sortingNetwork.printComparatorsSummary();
-
-        for (int workerRank = 1; workerRank < general_size; workerRank++) {
-            unsigned i0 = (workerRank - 1) * m;
-            MPI_Send(&mainArray[i0], m, MPI_DOUBLE, workerRank, 0, MPI_COMM_WORLD);
-            // usleep(10000);
-        }
-    } else {
-        std::vector<double> array1(m);
-        std::vector<double> array2(m);
-
-        MPI_Recv(&array1[0], m, MPI_DOUBLE, masterRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // std::cout << rank << ":\n";
-        // for (int i = 0; i < m; i++) {
-        //     std::cout << array1[i] << " ";
-        // }
-        // std::cout << std::endl;
+    std::cout << rank << ":\n";
+    for (int i = 0; i < m; i++) {
+        std::cout << myArray[i] << " ";
     }
+    std::cout << std::endl;
 
     // выключаем MPI
     MPI_Finalize();

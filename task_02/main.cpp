@@ -18,6 +18,7 @@
 using ElementType = __uint16_t;
 
 const bool DEBUG_MODE = true;
+const useconds_t SLEEP_TIME_AFTER_BARRIER = 100;
 
 void printVector(const std::vector<ElementType>& array) {
     std::cout << "Vector(" << array.size() << "): ";
@@ -33,6 +34,8 @@ class BatcherSortingNetwork {
     struct Comparator {
         size_t a;
         size_t b;
+
+        bool contain(size_t index) { return index == a || index == b; }
     };
 
     class Tact {
@@ -73,6 +76,8 @@ class BatcherSortingNetwork {
     }
 
     std::vector<Tact> getTacts() const { return _tactsVector; }
+
+    std::vector<Comparator> getComparators() const { return _comparatorsVector; }
 
     void printComparatorsSummary() const {
         std::cout << (long long)(_n) << " 0 0" << std::endl;
@@ -142,9 +147,7 @@ class BatcherSortingNetwork {
     }
 
    private:
-    void _addComparator(const size_t a, const size_t b) {
-        _comparatorsVector.push_back(Comparator{a, b});
-    }
+    void _addComparator(const size_t a, const size_t b) { _comparatorsVector.push_back(Comparator{a, b}); }
 
     // Рекурсивная процедура слияния двух групп линий (a, step, n) и (b, step, m)
     void _S(const size_t a, const size_t b, const size_t step, const size_t n, const size_t m) {
@@ -308,6 +311,22 @@ void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int 
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+void distributeValues(size_t m, std::vector<double>* array1, std::vector<double>* array2) {
+    std::vector<double> tmpArray(m * 2);
+
+    for (size_t i = 0; i < m; i++) {
+        tmpArray[i] = (*array1)[i];
+        tmpArray[m + i] = (*array2)[i];
+    }
+
+    std::sort(tmpArray.begin(), tmpArray.end());
+
+    for (size_t i = 0; i < m; i++) {
+        (*array1)[i] = tmpArray[i];
+        (*array2)[i] = tmpArray[m + i];
+    }
+}
+
 int main(int argc, char* argv[]) {
     // Задаем размер исходного массива
     const size_t n = 30;
@@ -325,26 +344,82 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
 
+    // std::cout << 1 << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // sleep(SLEEP_TIME_AFTER_BARRIER);
+    // std::cout << 2 << std::endl;
+    // return 0;
+
     // Получаем такты сортировки
     BatcherSortingNetwork sortingNetwork(processCount);
-    // std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
+    std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
+    std::vector<BatcherSortingNetwork::Comparator> networkComparators = sortingNetwork.getComparators();
 
     // Размер куска массива для каждого процесса
     size_t m = (int)std::ceil((double)n / processCount);
     std::vector<double> myArray(m);
+    std::vector<double> otherArray(m);
     shareArray(n, m, &myArray, rank, processCount);
 
     if (DEBUG_MODE) {
-        std::cout << rank << ":\n";
+        std::cout << rank << ": ";
         for (int i = 0; i < m; i++) {
             std::cout << myArray[i] << " ";
         }
         std::cout << std::endl;
 
         if (rank == 0) {
-            sleep(1);
-            sortingNetwork.printComparatorsSummary();
+            sleep(10);
+            sortingNetwork.printTactsSummary();
+            std::cout << std::endl;
         }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    sleep(SLEEP_TIME_AFTER_BARRIER);
+
+    int i = 0;
+
+    for (BatcherSortingNetwork::Tact networkTact : networkTacts) {
+        for (BatcherSortingNetwork::Comparator comparator : networkTact.getComparators()) {
+            // if (comparator.contain(rank)) {
+            //     std::cout << "tact: " << i << "  rank: " << rank << std::endl;
+            // }
+
+            if (rank == comparator.a) {
+                // отправляем массив этого процесса на сравнение другому процессу
+                MPI_Send(&myArray[0], m, MPI_DOUBLE, comparator.b, 0, MPI_COMM_WORLD);
+                MPI_Recv(&myArray[0], m, MPI_DOUBLE, comparator.b, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                std::cout << "tact " << i << ": " << (long long)(comparator.a) << " -> "
+                          << (long long)(comparator.b) << " done" << std::endl;
+
+            } else if (rank == comparator.b) {
+                // получаем массив от другого процесса на сравнение
+                // std::vector<double> otherArray(m);
+                MPI_Recv(&otherArray[0], m, MPI_DOUBLE, comparator.a, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // otherArray должен забрать меньшие элементы, а myArray - бОльшие
+                distributeValues(m, &otherArray, &myArray);
+
+                // Отправляем полученные массив обратно
+                MPI_Send(&otherArray[0], m, MPI_DOUBLE, comparator.a, 0, MPI_COMM_WORLD);
+            }
+        }
+
+        // Подождем, пока все закончат сравниваться на этом такте
+        MPI_Barrier(MPI_COMM_WORLD);
+        sleep(SLEEP_TIME_AFTER_BARRIER);
+
+        i++;
+    }
+
+    if (DEBUG_MODE) {
+        std::cout << rank << ": ";
+        for (int i = 0; i < m; i++) {
+            std::cout << myArray[i] << " ";
+        }
+        std::cout << std::endl;
     }
 
     // Завершаем MPI

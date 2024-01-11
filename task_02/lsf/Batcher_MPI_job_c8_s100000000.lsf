@@ -1,0 +1,7 @@
+#BSUB -n 8
+#BSUB -W 00:15
+#BSUB -o "Batcher_MPI_job.%J.c8.s100000000.out"
+#BSUB -e "Batcher_MPI_job.%J.c8.s100000000.err"
+#BSUB -R "span[ptile=4]"
+#BSUB -m "polus-c3-ib polus-c4-ib"
+mpirun ./main 100000000

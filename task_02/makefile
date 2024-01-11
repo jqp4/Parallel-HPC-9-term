@@ -16,4 +16,4 @@ compile:
 # 	mpirun -n 36 --oversubscribe ./main
 
 run:
-	mpiexec -np 2 ./main 1000000
+	mpiexec -np 8 ./main 20000

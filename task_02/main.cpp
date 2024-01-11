@@ -274,12 +274,7 @@ void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
     }
 }
 
-void shareArray(size_t n,
-                size_t m,
-                std::vector<double>* myArray,
-                // std::vector<BatcherSortingNetwork::Tact>* networkTacts,
-                int rank,
-                int processCount) {
+void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int processCount) {
     // Пусть процесс 0 временно побудет мастер-процессом,
     // который разошлет исходный массив всем процессам по частям
     if (rank == 0) {
@@ -290,9 +285,6 @@ void shareArray(size_t n,
         // Заполняем первые N элементов случайными числами
         std::srand(unsigned(std::time(nullptr)));
         generateArray(&mainArray, n, extendedN);
-
-        // BatcherSortingNetwork sortingNetwork(n);
-        // sortingNetwork.printComparatorsSummary();
 
         // Рассылаем кусочки основного массива одинаковой длины
         for (int workerRank = 1; workerRank < processCount; workerRank++) {
@@ -314,24 +306,6 @@ void shareArray(size_t n,
 
     // Подождем, пока все отсортируются
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // return;
-
-    // Теперь разошлем такты сети сортировки
-    // if (rank == 0) {
-    //     BatcherSortingNetwork sortingNetwork(processCount);
-    //     *networkTacts = sortingNetwork.getTacts();
-
-    //     // Рассылаем
-    //     for (int workerRank = 1; workerRank < processCount; workerRank++) {
-    //         unsigned size = (*networkTacts).size();
-    //         MPI_Send(&(*networkTacts)[0], size, MPI_DOUBLE, workerRank, 0, MPI_COMM_WORLD);
-    //     }
-
-    // } else {
-    //     // Принимаем  (для каждого процесса)
-    //     MPI_Recv(&(*networkTacts)[0], m, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    // }
 }
 
 int main(int argc, char* argv[]) {
@@ -353,14 +327,11 @@ int main(int argc, char* argv[]) {
 
     // Получаем такты сортировки
     BatcherSortingNetwork sortingNetwork(processCount);
-    std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
+    // std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
 
     // Размер куска массива для каждого процесса
     size_t m = (int)std::ceil((double)n / processCount);
     std::vector<double> myArray(m);
-    // std::vector<double> otherArray(m);
-    // std::vector<BatcherSortingNetwork::Tact> networkTacts;
-    // shareArray(n, m, &myArray, &networkTacts, rank, processCount);
     shareArray(n, m, &myArray, rank, processCount);
 
     if (DEBUG_MODE) {
@@ -372,7 +343,7 @@ int main(int argc, char* argv[]) {
 
         if (rank == 0) {
             sleep(1);
-            sortingNetwork.printTactsSummary();
+            sortingNetwork.printComparatorsSummary();
         }
     }
 

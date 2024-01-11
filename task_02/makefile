@@ -7,6 +7,7 @@ all: clear compile run
 
 clear:
 	rm -rf ./main
+	clear
 
 compile:
 	$(CC) main.cpp $(CPP_FLAGS) -o main

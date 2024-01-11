@@ -12,9 +12,12 @@
 #include <vector>
 #include "mpi.h"
 
+#define sleep(ms) usleep((useconds_t)ms * 1000)
 #define assertm(exp, msg) assert(((void)msg, exp))
 
 using ElementType = __uint16_t;
+
+const bool DEBUG_MODE = true;
 
 void printVector(const std::vector<ElementType>& array) {
     std::cout << "Vector(" << array.size() << "): ";
@@ -81,7 +84,9 @@ class BatcherSortingNetwork {
 
         std::cout << _comparatorsVector.size() << std::endl;
         std::cout << _tactsVector.size() << std::endl;
+    }
 
+    void printTactsSummary() const {
         std::cout << "\nNetwork tacts:\n";
         for (Tact tact : _tactsVector) {
             for (Comparator comparator : tact.getComparators()) {
@@ -269,69 +274,109 @@ void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
     }
 }
 
-void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int general_size) {
+void shareArray(size_t n,
+                size_t m,
+                std::vector<double>* myArray,
+                // std::vector<BatcherSortingNetwork::Tact>* networkTacts,
+                int rank,
+                int processCount) {
+    // Пусть процесс 0 временно побудет мастер-процессом,
+    // который разошлет исходный массив всем процессам по частям
     if (rank == 0) {
-        // размер расширенного массива
-        size_t extendedN = m * general_size;
+        // Размер расширенного массива
+        size_t extendedN = m * processCount;
         // Основной массив, создается сразу расширенным
         std::vector<double> mainArray(extendedN);
+        // Заполняем первые N элементов случайными числами
         std::srand(unsigned(std::time(nullptr)));
         generateArray(&mainArray, n, extendedN);
 
         // BatcherSortingNetwork sortingNetwork(n);
         // sortingNetwork.printComparatorsSummary();
 
-        for (int workerRank = 1; workerRank < general_size; workerRank++) {
+        // Рассылаем кусочки основного массива одинаковой длины
+        for (int workerRank = 1; workerRank < processCount; workerRank++) {
             unsigned i0 = workerRank * m;
             MPI_Send(&mainArray[i0], m, MPI_DOUBLE, workerRank, 0, MPI_COMM_WORLD);
         }
 
+        // Для 0 процесса отдельно копируем первый кусочек
         for (int i = 0; i < m; i++) {
             (*myArray)[i] = mainArray[i];
         }
     } else {
-        // первым действием принимаем свою часть массива
+        // Принимаем свою часть массива (для каждого процесса)
         MPI_Recv(&(*myArray)[0], m, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // std::cout << rank << ":\n";
-        // for (int i = 0; i < m; i++) {
-        //     std::cout << myArray[i] << " ";
-        // }
-        // std::cout << std::endl;
     }
 
+    // В каждом процессе сортируем полученные кусочки массива
     std::sort((*myArray).begin(), (*myArray).end());
+
+    // Подождем, пока все отсортируются
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // return;
+
+    // Теперь разошлем такты сети сортировки
+    // if (rank == 0) {
+    //     BatcherSortingNetwork sortingNetwork(processCount);
+    //     *networkTacts = sortingNetwork.getTacts();
+
+    //     // Рассылаем
+    //     for (int workerRank = 1; workerRank < processCount; workerRank++) {
+    //         unsigned size = (*networkTacts).size();
+    //         MPI_Send(&(*networkTacts)[0], size, MPI_DOUBLE, workerRank, 0, MPI_COMM_WORLD);
+    //     }
+
+    // } else {
+    //     // Принимаем  (для каждого процесса)
+    //     MPI_Recv(&(*networkTacts)[0], m, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    // }
 }
 
 int main(int argc, char* argv[]) {
+    // Задаем размер исходного массива
     const size_t n = 30;
 
-    // создаем группу процессов и область связи
+    // Создаем группу процессов и область связи
     int rc = MPI_Init(&argc, &argv);
-
     if (rc) {
         std::cout << "Ошибка запуска " << rc << ", выполнение остановлено\n";
         MPI_Abort(MPI_COMM_WORLD, rc);
         return rc;
     }
 
-    int rank, general_size;
+    // Узнаем номер текущего процесса
+    int rank, processCount;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &general_size);
+    MPI_Comm_size(MPI_COMM_WORLD, &processCount);
 
-    // размер куска массива для каждого процесса
-    size_t m = (int)std::ceil((double)n / general_size);
+    // Получаем такты сортировки
+    BatcherSortingNetwork sortingNetwork(processCount);
+    std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
+
+    // Размер куска массива для каждого процесса
+    size_t m = (int)std::ceil((double)n / processCount);
     std::vector<double> myArray(m);
     // std::vector<double> otherArray(m);
-    shareArray(n, m, &myArray, rank, general_size);
+    // std::vector<BatcherSortingNetwork::Tact> networkTacts;
+    // shareArray(n, m, &myArray, &networkTacts, rank, processCount);
+    shareArray(n, m, &myArray, rank, processCount);
 
-    std::cout << rank << ":\n";
-    for (int i = 0; i < m; i++) {
-        std::cout << myArray[i] << " ";
+    if (DEBUG_MODE) {
+        std::cout << rank << ":\n";
+        for (int i = 0; i < m; i++) {
+            std::cout << myArray[i] << " ";
+        }
+        std::cout << std::endl;
+
+        if (rank == 0) {
+            sleep(1);
+            sortingNetwork.printTactsSummary();
+        }
     }
-    std::cout << std::endl;
 
-    // выключаем MPI
+    // Завершаем MPI
     MPI_Finalize();
     return 0;
 }

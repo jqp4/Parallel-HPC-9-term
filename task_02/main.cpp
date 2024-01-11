@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -15,10 +16,12 @@
 #define sleep(ms) usleep((useconds_t)ms * 1000)
 #define assertm(exp, msg) assert(((void)msg, exp))
 
-// using ElementType = double;
-
+const int MASTER_RANK = 0;
 const bool DEBUG_MODE = true;
 const useconds_t SLEEP_TIME_AFTER_BARRIER = 50;
+
+using ElementType = double;
+const ElementType ELEMENT_TYPE_MAX = __DBL_MAX__;
 
 class BatcherSortingNetwork {
    public:
@@ -202,29 +205,29 @@ class BatcherSortingNetwork {
     std::vector<Tact> _tactsVector;
 };
 
-void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
-    const double maxValue = 100;
+void generateArray(std::vector<ElementType>* array, size_t n, size_t extendedN) {
+    const ElementType maxValue = 100;
+    std::srand(unsigned(std::time(nullptr)));
 
     for (int i = 0; i < n; i++) {
-        (*array)[i] = (double)rand() / RAND_MAX * maxValue;
+        (*array)[i] = (ElementType)rand() / RAND_MAX * maxValue;
     }
 
     for (int i = n; i < extendedN; i++) {
-        (*array)[i] = __DBL_MAX__;
+        (*array)[i] = ELEMENT_TYPE_MAX;
     }
 }
 
 // Функция распределения массива по процессам
-void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int processCount) {
+void shareArray(size_t n, size_t m, std::vector<ElementType>* myArray, int rank, int processCount) {
     // Пусть процесс 0 временно побудет мастер-процессом,
     // который разошлет исходный массив всем процессам по частям
-    if (rank == 0) {
+    if (rank == MASTER_RANK) {
         // Размер расширенного массива
         size_t extendedN = m * processCount;
         // Основной массив, создается сразу расширенным
-        std::vector<double> mainArray(extendedN);
+        std::vector<ElementType> mainArray(extendedN);
         // Заполняем первые N элементов случайными числами
-        std::srand(unsigned(std::time(nullptr)));
         generateArray(&mainArray, n, extendedN);
 
         // Рассылаем кусочки основного массива одинаковой длины
@@ -251,17 +254,28 @@ void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int 
 }
 
 // Функция распределения значений в 2 массивах длинны M. array1 получает меньшие элементы, а array2 - большие
-void distributeValues(size_t m, std::vector<double>* array1, std::vector<double>* array2) {
-    std::vector<double> tmpArray(m * 2);
+void distributeValues(size_t m, std::vector<ElementType>* array1, std::vector<ElementType>* array2) {
+    std::vector<ElementType> tmpArray(m * 2);
+    size_t i = 0, j = 0, k = 0;
 
-    for (size_t i = 0; i < m; i++) {
-        tmpArray[i] = (*array1)[i];
-        tmpArray[m + i] = (*array2)[i];
+    while (i < m && j < m) {
+        if ((*array1)[i] < (*array2)[j]) {
+            tmpArray[k++] = (*array1)[i++];
+        } else {
+            tmpArray[k++] = (*array2)[j++];
+        }
     }
 
-    std::sort(tmpArray.begin(), tmpArray.end());
+    while (i < m) {
+        tmpArray[k++] = (*array1)[i++];
+    }
 
-    for (size_t i = 0; i < m; i++) {
+    while (j < m) {
+        tmpArray[k++] = (*array2)[j++];
+    }
+
+    // Копируем обратно
+    for (i = 0; i < m; i++) {
         (*array1)[i] = tmpArray[i];
         (*array2)[i] = tmpArray[m + i];
     }
@@ -280,8 +294,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    size_t n = _n;
-
     // Создаем группу процессов и область связи
     int rc = MPI_Init(&argc, &argv);
     if (rc) {
@@ -295,50 +307,73 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
 
+    size_t i = 0;
+    size_t n = (size_t)_n;
+    size_t m = (size_t)std::ceil((ElementType)n / processCount);
+    double timestampStart, timestampTactStart, timestampEnd;
+
+    // если процесс всего один
+    if (processCount == 1) {
+        std::vector<ElementType> array(_n);
+        generateArray(&array, _n, _n);
+
+        timestampStart = MPI_Wtime();
+        std::sort(array.begin(), array.end());
+        timestampEnd = MPI_Wtime();
+
+        std::cout << "\nElapsed time is " << timestampEnd - timestampStart << " seconds." << std::endl;
+        MPI_Finalize();
+        return 0;
+    }
+
     // Получаем такты сортировки
     BatcherSortingNetwork sortingNetwork(processCount);
     std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
     std::vector<BatcherSortingNetwork::Comparator> networkComparators = sortingNetwork.getComparators();
 
     // Для каждого процесса создаем кусочек массива размера m = n / processCount, и заполняем его
-    size_t i = 0;
-    size_t m = (size_t)std::ceil((double)n / processCount);
-    std::vector<double> myArray(m);
-    std::vector<double> otherArray(m);
+    std::vector<ElementType> myArray(m);
+    std::vector<ElementType> otherArray(m);
     shareArray(n, m, &myArray, rank, processCount);
 
     // Ввывод полезной информации (1/2), если включен DEBUG_MODE
     if (DEBUG_MODE) {
-        if (rank == 0) {
-            std::cout << "Parts of the array in processes before sorting:" << std::endl;
-        }
+        // Настраиваем вывод
+        // std::cout << std::fixed;
+        std::cout << std::setprecision(5);
 
-        sleep(10 + rank * 2);
-        std::cout << "r" << rank << ": ";
-        for (int i = 0; i < m; i++) {
-            std::cout << myArray[i] << " ";
-        }
+        if (m < 50) {
+            if (rank == MASTER_RANK) {
+                std::cout << "Parts of the array in processes before sorting:" << std::endl;
+            }
 
-        std::cout << std::endl;
-        sleep(10 + (processCount - rank - 1) * 2);
-        MPI_Barrier(MPI_COMM_WORLD);
+            sleep(10 + rank * 2);
+            std::cout << "r" << rank << ": ";
+            for (int i = 0; i < m; i++) {
+                std::cout << myArray[i] << " ";
+            }
 
-        if (rank == 0) {
-            sortingNetwork.printTactsSummary();
             std::cout << std::endl;
+            sleep(10 + (processCount - rank - 1) * 2);
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        if (rank == MASTER_RANK) {
+            sortingNetwork.printTactsSummary();
+            std::cout << "\nAlgorithm logs:" << std::endl;
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
         sleep(SLEEP_TIME_AFTER_BARRIER);
     }
 
+    // Записываем время старта работы основного алгоритма
+    timestampStart = MPI_Wtime();
+
     // Основная часть программы: сеть обменной сортировки со слиянием Бэтчера
     for (BatcherSortingNetwork::Tact networkTact : networkTacts) {
         for (BatcherSortingNetwork::Comparator comparator : networkTact.getComparators()) {
-            if (DEBUG_MODE && rank == comparator.a) {
-                std::cout << "Tact " << i << ": r" << (long long)(comparator.a) << " -> r"
-                          << (long long)(comparator.b) << ", done" << std::endl;
-            }
+            timestampTactStart = MPI_Wtime();
 
             if (rank == comparator.a) {
                 // Отправляем массив этого процесса на сравнение другому процессу
@@ -353,6 +388,12 @@ int main(int argc, char* argv[]) {
                 // Отправляем полученные массив обратно
                 MPI_Send(&otherArray[0], m, MPI_DOUBLE, comparator.a, 0, MPI_COMM_WORLD);
             }
+
+            if (DEBUG_MODE && rank == comparator.a) {
+                std::cout << "Tact " << i << ": r" << (long long)(comparator.a) << " -> r"
+                          << (long long)(comparator.b) << ", done in " << MPI_Wtime() - timestampTactStart
+                          << " seconds" << std::endl;
+            }
         }
 
         // Подождем, пока все закончат сравниваться на этом такте
@@ -361,20 +402,36 @@ int main(int argc, char* argv[]) {
         i++;
     }
 
+    // Записываем время завершения основного основного алгоритма
+    timestampEnd = MPI_Wtime();
+
     // Ввывод полезной информации (2/2), если включен DEBUG_MODE
     if (DEBUG_MODE) {
-        sleep(10);
-        if (rank == 0) {
-            std::cout << "\nParts of the array in processes after sorting:" << std::endl;
-        }
+        if (m < 50) {
+            sleep(10);
+            if (rank == MASTER_RANK) {
+                std::cout << "\nParts of the array in processes after sorting:" << std::endl;
+            }
 
-        sleep(10 + rank * 2);
-        std::cout << "r" << rank << ": ";
-        for (int i = 0; i < m; i++) {
-            std::cout << myArray[i] << " ";
-        }
+            sleep(10 + rank * 2);
+            std::cout << "r" << rank << ": ";
+            for (int i = 0; i < m; i++) {
+                std::cout << myArray[i] << " ";
+            }
 
-        std::cout << std::endl;
+            std::cout << std::endl;
+            sleep(10 + (processCount - rank - 1) * 2);
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if (rank == MASTER_RANK) {
+                std::cout << std::endl;
+            }
+        }
+    }
+
+    // Выводим полученные данные о работе алгоритма
+    if (rank == MASTER_RANK) {
+        std::cout << "\nElapsed time is " << timestampEnd - timestampStart << " seconds." << std::endl;
     }
 
     // Завершаем MPI

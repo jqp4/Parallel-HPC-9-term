@@ -15,19 +15,10 @@
 #define sleep(ms) usleep((useconds_t)ms * 1000)
 #define assertm(exp, msg) assert(((void)msg, exp))
 
-using ElementType = __uint16_t;
+// using ElementType = double;
 
 const bool DEBUG_MODE = true;
-const useconds_t SLEEP_TIME_AFTER_BARRIER = 100;
-
-void printVector(const std::vector<ElementType>& array) {
-    std::cout << "Vector(" << array.size() << "): ";
-    for (ElementType element : array) {
-        std::cout << (long long)(element) << " ";
-    }
-
-    std::cout << std::endl;
-}
+const useconds_t SLEEP_TIME_AFTER_BARRIER = 50;
 
 class BatcherSortingNetwork {
    public:
@@ -104,49 +95,6 @@ class BatcherSortingNetwork {
 
             std::cout << std::endl;
         }
-    }
-
-    void sortVector(std::vector<ElementType>& array) const {
-        assertm(array.size() == _n, "Incorrect vector size.");
-
-        for (Comparator comparator : _comparatorsVector) {
-            if (array[comparator.a] > array[comparator.b]) {
-                std::swap(array[comparator.a], array[comparator.b]);
-            }
-        }
-    }
-
-    bool checkTheSortingIsCorrect(std::vector<ElementType>& array) const {
-        assertm(array.size() == _n, "Incorrect vector size.");
-
-        std::vector<ElementType> correctlySortedArray(array);
-        std::sort(correctlySortedArray.begin(), correctlySortedArray.end());
-        sortVector(array);
-
-        // проверка
-        // printVector(array);
-        // printVector(correctlySortedArray);
-
-        return array == correctlySortedArray;
-    }
-
-    bool checkThatSortingIsCorrectForAllCases() const {
-        std::vector<ElementType> array(_n);
-
-        for (unsigned long arrayNum = 0; arrayNum < 1 << _n; arrayNum++) {
-            size_t i = _n - 1;
-            unsigned long _num = arrayNum;
-            while (_num > 0) {
-                array[i] = ElementType(_num & 1);
-                _num >>= 1;
-                i--;
-            }
-
-            if (!checkTheSortingIsCorrect(array)) {
-                return false;
-            }
-        }
-        return true;
     }
 
    private:
@@ -254,38 +202,6 @@ class BatcherSortingNetwork {
     std::vector<Tact> _tactsVector;
 };
 
-void batcherSortingNetworkTest() {
-    std::cout << "Batcher Sorting Network Test\n";
-    std::cout << "[1] Testing all possible combinations"
-              << " of arrays of length N = 1..24:\n";
-
-    for (size_t n = 1; n <= 24; n++) {
-        std::cout << " N = " << (long long)(n) << ": ";
-
-        BatcherSortingNetwork sortingNetwork(n);
-        bool result = sortingNetwork.checkThatSortingIsCorrectForAllCases();
-
-        std::cout << (result ? "PASSED" : "FAILED") << std::endl;
-        assertm(result, "Batcher Sorting Network test failed.");
-    }
-
-    const size_t nMax = 10000;
-    std::cout << "[2] Testing random arrays of length N = " << nMax << ":\n";
-
-    BatcherSortingNetwork sortingNetwork(nMax);
-    for (unsigned i = 0; i < 10; i++) {
-        std::cout << " try #" << i << ": ";
-
-        std::vector<ElementType> bigArray(nMax);
-        std::srand(unsigned(std::time(nullptr)));
-        std::generate(bigArray.begin(), bigArray.end(), std::rand);
-        bool result = sortingNetwork.checkTheSortingIsCorrect(bigArray);
-
-        std::cout << (result ? "PASSED" : "FAILED") << std::endl;
-        assertm(result, "Batcher Sorting Network test failed.");
-    }
-}
-
 void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
     const double maxValue = 100;
 
@@ -298,6 +214,7 @@ void generateArray(std::vector<double>* array, size_t n, size_t extendedN) {
     }
 }
 
+// Функция распределения массива по процессам
 void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int processCount) {
     // Пусть процесс 0 временно побудет мастер-процессом,
     // который разошлет исходный массив всем процессам по частям
@@ -330,8 +247,10 @@ void shareArray(size_t n, size_t m, std::vector<double>* myArray, int rank, int 
 
     // Подождем, пока все отсортируются
     MPI_Barrier(MPI_COMM_WORLD);
+    sleep(SLEEP_TIME_AFTER_BARRIER);
 }
 
+// Функция распределения значений в 2 массивах длинны M. array1 получает меньшие элементы, а array2 - большие
 void distributeValues(size_t m, std::vector<double>* array1, std::vector<double>* array2) {
     std::vector<double> tmpArray(m * 2);
 
@@ -349,8 +268,19 @@ void distributeValues(size_t m, std::vector<double>* array1, std::vector<double>
 }
 
 int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cout << "There are not enough command line arguments.\n";
+        return -1;
+    }
+
     // Задаем размер исходного массива
-    const size_t n = 30;
+    int _n = std::stoi(argv[1]);
+    if (_n < 1) {
+        std::cout << "n must be greater than 0.\n";
+        return -1;
+    }
+
+    size_t n = _n;
 
     // Создаем группу процессов и область связи
     int rc = MPI_Init(&argc, &argv);
@@ -365,64 +295,61 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
 
-    // std::cout << 1 << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // sleep(SLEEP_TIME_AFTER_BARRIER);
-    // std::cout << 2 << std::endl;
-    // return 0;
-
     // Получаем такты сортировки
     BatcherSortingNetwork sortingNetwork(processCount);
     std::vector<BatcherSortingNetwork::Tact> networkTacts = sortingNetwork.getTacts();
     std::vector<BatcherSortingNetwork::Comparator> networkComparators = sortingNetwork.getComparators();
 
-    // Размер куска массива для каждого процесса
-    size_t m = (int)std::ceil((double)n / processCount);
+    // Для каждого процесса создаем кусочек массива размера m = n / processCount, и заполняем его
+    size_t i = 0;
+    size_t m = (size_t)std::ceil((double)n / processCount);
     std::vector<double> myArray(m);
     std::vector<double> otherArray(m);
     shareArray(n, m, &myArray, rank, processCount);
 
+    // Ввывод полезной информации (1/2), если включен DEBUG_MODE
     if (DEBUG_MODE) {
-        std::cout << rank << ": ";
+        if (rank == 0) {
+            std::cout << "Parts of the array in processes before sorting:" << std::endl;
+        }
+
+        sleep(10 + rank * 2);
+        std::cout << "r" << rank << ": ";
         for (int i = 0; i < m; i++) {
             std::cout << myArray[i] << " ";
         }
+
         std::cout << std::endl;
+        sleep(10 + (processCount - rank - 1) * 2);
+        MPI_Barrier(MPI_COMM_WORLD);
 
         if (rank == 0) {
-            sleep(10);
             sortingNetwork.printTactsSummary();
             std::cout << std::endl;
         }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        sleep(SLEEP_TIME_AFTER_BARRIER);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    sleep(SLEEP_TIME_AFTER_BARRIER);
-
-    int i = 0;
-
+    // Основная часть программы: сеть обменной сортировки со слиянием Бэтчера
     for (BatcherSortingNetwork::Tact networkTact : networkTacts) {
         for (BatcherSortingNetwork::Comparator comparator : networkTact.getComparators()) {
-            // if (comparator.contain(rank)) {
-            //     std::cout << "tact: " << i << "  rank: " << rank << std::endl;
-            // }
+            if (DEBUG_MODE && rank == comparator.a) {
+                std::cout << "Tact " << i << ": r" << (long long)(comparator.a) << " -> r"
+                          << (long long)(comparator.b) << ", done" << std::endl;
+            }
 
             if (rank == comparator.a) {
-                // отправляем массив этого процесса на сравнение другому процессу
+                // Отправляем массив этого процесса на сравнение другому процессу
                 MPI_Send(&myArray[0], m, MPI_DOUBLE, comparator.b, 0, MPI_COMM_WORLD);
+                // Получаем массив этого процесса с новыми значениями
                 MPI_Recv(&myArray[0], m, MPI_DOUBLE, comparator.b, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                std::cout << "tact " << i << ": " << (long long)(comparator.a) << " -> "
-                          << (long long)(comparator.b) << " done" << std::endl;
-
             } else if (rank == comparator.b) {
-                // получаем массив от другого процесса на сравнение
-                // std::vector<double> otherArray(m);
+                // Получаем массив от другого процесса на сравнение
                 MPI_Recv(&otherArray[0], m, MPI_DOUBLE, comparator.a, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
                 // otherArray должен забрать меньшие элементы, а myArray - бОльшие
                 distributeValues(m, &otherArray, &myArray);
-
                 // Отправляем полученные массив обратно
                 MPI_Send(&otherArray[0], m, MPI_DOUBLE, comparator.a, 0, MPI_COMM_WORLD);
             }
@@ -431,15 +358,22 @@ int main(int argc, char* argv[]) {
         // Подождем, пока все закончат сравниваться на этом такте
         MPI_Barrier(MPI_COMM_WORLD);
         sleep(SLEEP_TIME_AFTER_BARRIER);
-
         i++;
     }
 
+    // Ввывод полезной информации (2/2), если включен DEBUG_MODE
     if (DEBUG_MODE) {
-        std::cout << rank << ": ";
+        sleep(10);
+        if (rank == 0) {
+            std::cout << "\nParts of the array in processes after sorting:" << std::endl;
+        }
+
+        sleep(10 + rank * 2);
+        std::cout << "r" << rank << ": ";
         for (int i = 0; i < m; i++) {
             std::cout << myArray[i] << " ";
         }
+
         std::cout << std::endl;
     }
 

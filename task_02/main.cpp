@@ -35,7 +35,11 @@ class BatcherSortingNetwork {
         size_t a;
         size_t b;
 
-        bool contain(size_t index) { return index == a || index == b; }
+        bool containIndex(size_t index) const { return index == a || index == b; }
+
+        bool containIndicesOf(Comparator otherComparator) const {
+            return containIndex(otherComparator.a) || containIndex(otherComparator.b);
+        }
     };
 
     class Tact {
@@ -44,23 +48,22 @@ class BatcherSortingNetwork {
 
         Tact(Comparator firstComparator) { addComparator(firstComparator); }
 
-        bool containIndicesOf(Comparator comparator) {
-            for (Comparator innerComparator : _comparators) {
-                if (innerComparator.a == comparator.a || innerComparator.a == comparator.b ||
-                    innerComparator.b == comparator.a || innerComparator.b == comparator.b) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         void addComparator(Comparator comparator) {
             assertm(!containIndicesOf(comparator),
                     "The added comparator has indices contained in the sequence of comparators of "
                     "this network tact.");
 
             _comparators.push_back(comparator);
+        }
+
+        bool containIndicesOf(Comparator comparator) const {
+            for (Comparator innerComparator : _comparators) {
+                if (innerComparator.containIndicesOf(comparator)) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         std::vector<Comparator> getComparators() const { return _comparators; }
@@ -220,9 +223,27 @@ class BatcherSortingNetwork {
         _tactsVector.push_back(Tact());
 
         for (Comparator comparator : _comparatorsVector) {
-            if (!_tactsVector.back().containIndicesOf(comparator)) {
-                _tactsVector.back().addComparator(comparator);
-            } else {
+            bool newTactIsRequired = true;
+            std::vector<Tact>::iterator tactIt = std::end(_tactsVector) - 1;
+
+            // Шаг 1: ищем последний такт, в котором встречаются индексы из нового компаратора
+            for (; tactIt != std::begin(_tactsVector); tactIt--) {
+                if (tactIt->containIndicesOf(comparator)) {
+                    break;
+                }
+            }
+
+            // Шаг 2: ищем ближайшую позицию после этого такта, куда можно вставить новый компаратор
+            for (; tactIt != std::end(_tactsVector); tactIt++) {
+                if (!tactIt->containIndicesOf(comparator)) {
+                    tactIt->addComparator(comparator);
+                    newTactIsRequired = false;
+                    break;
+                }
+            }
+
+            // Если такой позиции не нашлось, создаем новый такт
+            if (newTactIsRequired) {
                 _tactsVector.push_back(Tact(comparator));
             }
         }

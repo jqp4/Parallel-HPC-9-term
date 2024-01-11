@@ -213,33 +213,30 @@ class BatcherSortingNetwork {
 
         for (Comparator comparator : _comparatorsVector) {
             bool newTactIsRequired = true;
-            for (Tact& tact : _tactsVector) {
-                if (!tact.containIndicesOf(comparator)) {
-                    tact.addComparator(comparator);
+            std::vector<Tact>::iterator tactIt = std::end(_tactsVector) - 1;
+
+            // Шаг 1: ищем последний такт, в котором встречаются индексы из нового компаратора
+            for (; tactIt != std::begin(_tactsVector); tactIt--) {
+                if (tactIt->containIndicesOf(comparator)) {
+                    break;
+                }
+            }
+
+            // Шаг 2: ищем ближайшую позицию после этого такта, куда можно вставить новый компаратор
+            for (; tactIt != std::end(_tactsVector); tactIt++) {
+                if (!tactIt->containIndicesOf(comparator)) {
+                    tactIt->addComparator(comparator);
                     newTactIsRequired = false;
                     break;
                 }
             }
 
+            // Если такой позиции не нашлось, создаем новый такт
             if (newTactIsRequired) {
                 _tactsVector.push_back(Tact(comparator));
             }
         }
     }
-
-    // 1    0_1, 2_3, 4_5, 6_7,
-    // 2    0_2, 1_3, 4_6, 5_7,
-    // 3    1_2, 5_6, 0_4, 3_7,
-    // 4    2_6, 1_5,
-    // 5    2_4, 3_5,
-    // 6    1_2, 3_4, 5_6,
-
-    //      0_1, 2_3, 4_5, 6_7,
-    //      0_2, 1_3, 4_6, 5_7,
-    //      1_2, 5_6, 0_4, 3_7,
-    //      2_6, 1_5, 3_4,
-    //      2_4, 3_5,
-    //      1_2, 5_6,
 
     size_t _n;
     std::vector<Comparator> _comparatorsVector;

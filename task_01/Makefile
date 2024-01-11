@@ -8,10 +8,12 @@ all: clean compile run
 
 clean:
 	rm -rf main
+	clear
 
 compile: main.cpp
 	$(CC) main.cpp $(CPP_FLAGS) -o main
 
 run: main
 	./main 5
+	./main 8
  

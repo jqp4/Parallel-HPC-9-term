@@ -20,26 +20,73 @@ void printVector(const std::vector<ElementType>& array) {
 
 class BatcherSortingNetwork {
    public:
+    struct Comparator {
+        size_t a;
+        size_t b;
+
+        bool containIndex(size_t index) const { return index == a || index == b; }
+
+        bool containIndicesOf(Comparator otherComparator) const {
+            return containIndex(otherComparator.a) || containIndex(otherComparator.b);
+        }
+    };
+
+    class Tact {
+       public:
+        Tact() {}
+
+        Tact(Comparator firstComparator) { addComparator(firstComparator); }
+
+        void addComparator(Comparator comparator) {
+            assertm(!containIndicesOf(comparator),
+                    "The added comparator has indices contained in the sequence of comparators of "
+                    "this network tact.");
+
+            _comparators.push_back(comparator);
+        }
+
+        bool containIndicesOf(Comparator comparator) const {
+            for (Comparator innerComparator : _comparators) {
+                if (innerComparator.containIndicesOf(comparator)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        std::vector<Comparator> getComparators() const { return _comparators; }
+
+       private:
+        std::vector<Comparator> _comparators;
+    };
+
     BatcherSortingNetwork(const size_t n) {
         _n = n;
         _B(0, 1, _n);
         _calculateNetworkTacts();
     }
 
+    std::vector<Tact> getTacts() const { return _tactsVector; }
+
+    std::vector<Comparator> getComparators() const { return _comparatorsVector; }
+
     void printComparatorsSummary() const {
         std::cout << (long long)(_n) << " 0 0" << std::endl;
 
-        for (_Comparator comparator : _comparatorsVector) {
+        for (Comparator comparator : _comparatorsVector) {
             std::cout << (long long)(comparator.a) << " ";
             std::cout << (long long)(comparator.b) << std::endl;
         }
 
         std::cout << _comparatorsVector.size() << std::endl;
         std::cout << _tactsVector.size() << std::endl;
+    }
 
+    void printTactsSummary() const {
         std::cout << "\nNetwork tacts:\n";
-        for (_Tact tact : _tactsVector) {
-            for (_Comparator comparator : tact.getComparators()) {
+        for (Tact tact : _tactsVector) {
+            for (Comparator comparator : tact.getComparators()) {
                 std::cout << (long long)(comparator.a) << "_";
                 std::cout << (long long)(comparator.b) << ", ";
             }
@@ -51,7 +98,7 @@ class BatcherSortingNetwork {
     void sortVector(std::vector<ElementType>& array) const {
         assertm(array.size() == _n, "Incorrect vector size.");
 
-        for (_Comparator comparator : _comparatorsVector) {
+        for (Comparator comparator : _comparatorsVector) {
             if (array[comparator.a] > array[comparator.b]) {
                 std::swap(array[comparator.a], array[comparator.b]);
             }
@@ -92,45 +139,7 @@ class BatcherSortingNetwork {
     }
 
    private:
-    struct _Comparator {
-        size_t a;
-        size_t b;
-    };
-
-    class _Tact {
-       public:
-        _Tact() {}
-
-        _Tact(_Comparator firstComparator) { addComparator(firstComparator); }
-
-        bool containIndicesOf(_Comparator comparator) {
-            for (_Comparator innerComparator : _comparators) {
-                if (innerComparator.a == comparator.a || innerComparator.a == comparator.b ||
-                    innerComparator.b == comparator.a || innerComparator.b == comparator.b) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        void addComparator(_Comparator comparator) {
-            assertm(!containIndicesOf(comparator),
-                    "The added comparator has indices contained in the sequence of comparators of "
-                    "this network tact.");
-
-            _comparators.push_back(comparator);
-        }
-
-        std::vector<_Comparator> getComparators() const { return _comparators; }
-
-       private:
-        std::vector<_Comparator> _comparators;
-    };
-
-    void _addComparator(const size_t a, const size_t b) {
-        _comparatorsVector.push_back(_Comparator{a, b});
-    }
+    void _addComparator(const size_t a, const size_t b) { _comparatorsVector.push_back(Comparator{a, b}); }
 
     // Рекурсивная процедура слияния двух групп линий (a, step, n) и (b, step, m)
     void _S(const size_t a, const size_t b, const size_t step, const size_t n, const size_t m) {
@@ -200,20 +209,41 @@ class BatcherSortingNetwork {
     // Функция оптимального рассчета тактов сети сортировки
     void _calculateNetworkTacts() {
         assertm(!_comparatorsVector.empty(), "Network comparators vector is empty.");
-        _tactsVector.push_back(_Tact());
+        _tactsVector.push_back(Tact());
 
-        for (_Comparator comparator : _comparatorsVector) {
-            if (!_tactsVector.back().containIndicesOf(comparator)) {
-                _tactsVector.back().addComparator(comparator);
-            } else {
-                _tactsVector.push_back(_Tact(comparator));
+        for (Comparator comparator : _comparatorsVector) {
+            bool newTactIsRequired = true;
+            for (Tact& tact : _tactsVector) {
+                if (!tact.containIndicesOf(comparator)) {
+                    tact.addComparator(comparator);
+                    newTactIsRequired = false;
+                    break;
+                }
+            }
+
+            if (newTactIsRequired) {
+                _tactsVector.push_back(Tact(comparator));
             }
         }
     }
 
+    // 1    0_1, 2_3, 4_5, 6_7,
+    // 2    0_2, 1_3, 4_6, 5_7,
+    // 3    1_2, 5_6, 0_4, 3_7,
+    // 4    2_6, 1_5,
+    // 5    2_4, 3_5,
+    // 6    1_2, 3_4, 5_6,
+
+    //      0_1, 2_3, 4_5, 6_7,
+    //      0_2, 1_3, 4_6, 5_7,
+    //      1_2, 5_6, 0_4, 3_7,
+    //      2_6, 1_5, 3_4,
+    //      2_4, 3_5,
+    //      1_2, 5_6,
+
     size_t _n;
-    std::vector<_Comparator> _comparatorsVector;
-    std::vector<_Tact> _tactsVector;
+    std::vector<Comparator> _comparatorsVector;
+    std::vector<Tact> _tactsVector;
 };
 
 void batcherSortingNetworkTest() {
@@ -262,6 +292,7 @@ int main(int argc, char* argv[]) {
 
     BatcherSortingNetwork sortingNetwork(n);
     sortingNetwork.printComparatorsSummary();
+    // sortingNetwork.printTactsSummary();
 
     // Раскомментировать для тестирования сети сортировки
     // batcherSortingNetworkTest();

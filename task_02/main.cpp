@@ -429,7 +429,8 @@ int main(int argc, char* argv[]) {
         }
 
         // Подождем, пока все закончат сравниваться на этом такте
-        MPI_Barrier(MPI_COMM_WORLD);
+        // upd: не требуется, вспе и так работает
+        // MPI_Barrier(MPI_COMM_WORLD);
         i++;
     }
 
